@@ -1,0 +1,136 @@
+_schema-version: 3.3.0
+ID: capm_postgres
+description: A simple CAP project.
+version: 1.0.0
+modules:
+- name: capm_postgres-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: capm_postgres-postgres
+  - name: capm_postgres-auth
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    readiness-health-check-http-endpoint: /health
+    readiness-health-check-type: http
+  build-parameters:
+    builder: npm
+- name: capm_postgres-postgres-deployer
+  type: nodejs
+  path: gen/pg
+  requires:
+  - name: capm_postgres-postgres
+  parameters:
+    buildpack: nodejs_buildpack
+    no-route: true
+    no-start: true
+    tasks:
+    - command: npm start
+      name: deploy-to-postgresql
+- name: capm_postgres-destination-content
+  type: com.sap.application.content
+  requires:
+  - name: capm_postgres-destination-service
+    parameters:
+      content-target: true
+  - name: capm_postgres_html_repo_host
+    parameters:
+      service-key:
+        name: capm_postgres_html_repo_host-key
+  - name: capm_postgres-auth
+    parameters:
+      service-key:
+        name: capm_postgres-auth-key
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Name: capm_postgres_capm_postgres_html_repo_host
+          ServiceInstanceName: capm_postgres-html5-app-host-service
+          ServiceKeyName: capm_postgres_html_repo_host-key
+          sap.cloud.service: capm_postgres
+        - Authentication: OAuth2UserTokenExchange
+          Name: capm_postgres_capm_postgres_auth
+          ServiceInstanceName: capm_postgres-auth
+          ServiceKeyName: capm_postgres-auth-key
+          sap.cloud.service: capm_postgres
+        existing_destinations_policy: ignore
+  build-parameters:
+    no-source: true
+- name: capm_postgres-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: capm_postgres_html_repo_host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+    - artifacts:
+      - comsapcapmpostgres.zip
+      name: comsapcapmpostgres
+      target-path: resources/
+- name: comsapcapmpostgres
+  type: html5
+  path: app/capm_postgres
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: capm_postgres-postgres
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: postgresql-db
+    service-plan: trial
+- name: capm_postgres-auth
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      tenant-mode: dedicated
+      xsappname: capm_postgres-${org}-${space}
+    path: ./xs-security.json
+    service: xsuaa
+    service-plan: application
+- name: capm_postgres-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: capm_postgres-destination-service
+    service-plan: lite
+- name: capm_postgres_html_repo_host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: capm_postgres-html5-app-host-service
+    service-plan: app-host
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm ci
+    - npx cds build --production
+    - bash ./pg-build.sh
